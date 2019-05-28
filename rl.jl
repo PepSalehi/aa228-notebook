@@ -1,10 +1,10 @@
 using Distributions
-using GenerativeModels
-using POMDPToolbox # for WeightVec with rng sampling
+using StatsBase
+using Random
 include("gridworld.jl")
 include("helpers.jl")
 
-type MappedDiscreteMDP{SType,AType} <: MDP{SType,AType}
+mutable struct MappedDiscreteMDP{SType,AType} <: MDP{SType,AType}
     S::Vector{SType}
     A::Vector{AType}
     T::Array{Float64,3}
@@ -13,16 +13,17 @@ type MappedDiscreteMDP{SType,AType} <: MDP{SType,AType}
     stateIndex::Dict
     actionIndex::Dict
     nextStates
-    function MappedDiscreteMDP{SType,AType}(S::Vector{SType}, A::Vector{AType}, T, R; discount=0.9)
-        stateIndex = Dict([S[i]=>i for i in 1:length(S)])
-        actionIndex = Dict([A[i]=>i for i in 1:length(A)])
-        nextStates = Dict([(S[si], A[ai])=>S[find(T[si, ai, :])] for si=1:length(S), ai=1:length(A)])
-        new(S, A, T, R, discount, stateIndex, actionIndex, nextStates)
-    end
 end
 
-MappedDiscreteMDP{SType,AType}(S::Vector{SType}, A::Vector{AType}; discount=0.9) =
-    MappedDiscreteMDP{SType,AType}(S, A,
+function MappedDiscreteMDP(S::Vector, A::Vector, T, R; discount=0.9)
+    stateIndex = Dict([S[i]=>i for i in 1:length(S)])
+    actionIndex = Dict([A[i]=>i for i in 1:length(A)])
+    nextStates = Dict([(S[si], A[ai])=>S[findall(x->x!=0, T[si, ai, :])] for si=1:length(S), ai=1:length(A)])
+    MappedDiscreteMDP(S, A, T, R, discount, stateIndex, actionIndex, nextStates)
+end
+
+MappedDiscreteMDP(S::Vector, A::Vector; discount=0.9) =
+    MappedDiscreteMDP(S, A,
                     zeros(length(S), length(A), length(S)),
                     zeros(length(S), length(A)),
                     discount=discount)
@@ -39,7 +40,7 @@ action_index(mdp::MappedDiscreteMDP, a) = mdp.actionIndex[s]
 next_states(mdp::MappedDiscreteMDP, s, a) = mdp.nextStates[(s, a)]
 
 
-rand_state(mdp::MDP) = states(mdp)[rand(DiscreteUniform(1,numStates(mdp)))]
+rand_state(mdp::MDP) = states(mdp)[rand(DiscreteUniform(1,n_states(mdp)))]
 
 function value_iteration(mdp::MDP, iterations::Integer)
   V = zeros(n_states(mdp))
@@ -60,7 +61,7 @@ function value_iteration!(V::Vector, Q::Matrix, mdp::MDP, iterations::Integer)
       end
       V[s0i] = maximum(Q[s0i,:])
     end
-    copy!(V_old, V)
+    copyto!(V_old, V)
   end
 end
 
@@ -70,7 +71,7 @@ function update_parameters!(mdp::MappedDiscreteMDP, N, Nsa, ρ, s, a)
   denom = Nsa[si, ai]
   mdp.T[si, ai, :] = N[si, ai, :] ./ denom
   mdp.R[si, ai] = ρ[si, ai] / denom
-  mdp.nextStates[(s, a)]= mdp.S[find(mdp.T[si, ai, :])]
+  mdp.nextStates[(s, a)]= mdp.S[findall(x->x!=0, mdp.T[si, ai, :])]
 end
 
 function isterminal(mdp::MDP, s0, a)
@@ -78,13 +79,13 @@ function isterminal(mdp::MDP, s0, a)
   length(S1) == 0 || 0 == sum(s1 -> transition_pdf(mdp, s0, a, s1), S1)
 end
 
-function generate_s(mdp::MDP, s0, a, rng::AbstractRNG=Base.GLOBAL_RNG)
+function generate_s(mdp::MDP, s0, a, rng::AbstractRNG=Random.GLOBAL_RNG)
     p = [transition_pdf(mdp, s0, a, s1) for s1 in states(mdp)]
-    s1i = sample(rng, WeightVec(p))
+    s1i = sample(rng, Weights(p))
     states(mdp)[s1i]
 end
 
-type MLRL <: Policy
+mutable struct MLRL <: Policy
     N::Array{Float64,3} # transition counts
     Nsa::Matrix{Float64} # state-action counts
     ρ::Matrix{Float64} # sum of rewards
@@ -147,7 +148,9 @@ end
 
 function action(policy::MLRL, s)
     si = policy.mdp.stateIndex[s]
-    ai = indmax(policy.Q[si, :])
+    Qs = policy.Q[si, :]
+    ais = findall((in)(maximum(Qs)), Qs)
+    ai = rand(ais)
     policy.mdp.A[ai]
 end
 
@@ -188,4 +191,3 @@ function simulate(mdp::MDP, steps::Integer, policy::Policy; script=[])
     end
     (S, R, V)
 end
-

@@ -1,18 +1,24 @@
-Pkg.add("NBInclude")
-Pkg.add("BayesNets")
-# Pkg.checkout("BayesNets") # get the latest version
-Pkg.add("PGFPlots")
-# Pkg.checkout("PGFPlots") # get the latest version
-Pkg.add("Interact")
-# Pkg.checkout("Interact") # get the latest version
-Pkg.add("RDatasets")
-Pkg.add("Grid")
-Pkg.add("Reactive")
+import Pkg
 
+@info("Adding JuliaPOMDP Package Registry to your global list of registries.")
 Pkg.add("POMDPs")
-
 using POMDPs
-POMDPs.add("GenerativeModels")
-POMDPs.add("POMDPToolbox")
+POMDPs.add_registry()
 
-println("Dependency install complete! (check for errors)")
+ENV["PYTHON"]=""
+
+projdir = dirname(@__FILE__())
+toml = open(joinpath(projdir, "Project.toml")) do f
+    Pkg.TOML.parse(f)
+end
+pkgs = collect(keys(toml["deps"]))
+pkgstring = string([pkg*"\n    " for pkg in pkgs]...)
+@info("""
+    Installing the following packages to the current environment:
+
+    $pkgstring
+""")
+
+Pkg.add(pkgs)
+
+@info("Dependency install complete! (check for errors)")
